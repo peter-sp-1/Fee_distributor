@@ -232,7 +232,7 @@ export async function harvestTokenFees(mint: string) {
 
         const programId = TOKEN_2022_PROGRAM_ID;
         
-        // Get or create the destination token account for the payer
+        // Getting/creating the destination token account for the payer
         const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
             connection,
             payer,
@@ -242,7 +242,7 @@ export async function harvestTokenFees(mint: string) {
 
         console.log(`Destination token account: ${destinationTokenAccount.toBase58()}`);
         
-        // Get all token accounts for this specific token
+        // Getting all token accounts for this specific token
         const tokenAccounts = await connection.getProgramAccounts(programId, {
             commitment: "confirmed",
             filters: [{
@@ -253,7 +253,7 @@ export async function harvestTokenFees(mint: string) {
             }],
         });
 
-        // Find accounts with harvestable fees
+        // Finding accounts with harvestable fees
         const accountsWithFees = tokenAccounts
             .map(accountInfo => {
                 const account = unpackAccount(

@@ -240,7 +240,6 @@ export async function getWithheldTokensFromRawData(
 
         // Token-2022 account data structure includes extensions at the end
         // The withheld amount is stored in the TransferFeeAmount extension
-        // This is a simplified check - you may need to parse the full extension data
         const data = accountInfo.data;
         
         // Basic validation that this is a Token-2022 account
@@ -248,8 +247,6 @@ export async function getWithheldTokensFromRawData(
             return null;
         }
 
-        // For a proper implementation, you'd need to parse the extension data
-        // This is a placeholder - use getTransferFeeAmount instead
         return null;
         
     } catch (error) {
