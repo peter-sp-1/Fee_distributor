@@ -6,7 +6,6 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "ts-node src/check_fee_threshold.ts"
-
   },
   "keywords": [],
   "author": "",
@@ -14,6 +13,8 @@
   "devDependencies": {
     "@types/node": "^22.15.30",
     "@types/node-fetch": "^2.6.12",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.8.3"
   },
   "dependencies": {

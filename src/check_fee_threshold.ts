@@ -6,8 +6,12 @@ import {
 } from "@solana/web3.js";
 import {
     TOKEN_2022_PROGRAM_ID,
+    TOKEN_PROGRAM_ID,
     getTransferFeeAmount,
     unpackAccount,
+    getAssociatedTokenAddress,
+    createAssociatedTokenAccountInstruction,
+    getAccount
 } from "@solana/spl-token";
 import { harvestWithheldTokensToAuthority } from "./harvest";
 import * as fs from "fs";
@@ -17,8 +21,6 @@ const API_KEY = process.env.API_KEY;
 
 // Initialize connection and payer once
 const connection = new Connection(`https://rpc.helius.xyz/?api-key=${API_KEY}`, "confirmed");
-
-
 
 // Load wallet with proper error handling
 function loadWallet(): Keypair {
@@ -68,14 +70,77 @@ function loadWallet(): Keypair {
 const payer = loadWallet();
 const threshHold = Number(process.env.THRESH_HOLD) || 0;
 
+// Helper function to detect token program and get associated token address
+async function getOrCreateAssociatedTokenAccount(
+    connection: Connection,
+    payer: Keypair,
+    mint: PublicKey,
+    owner: PublicKey
+): Promise<PublicKey> {
+    // First, detect which program owns the mint
+    const mintInfo = await connection.getAccountInfo(mint);
+    if (!mintInfo) {
+        throw new Error("Mint account not found");
+    }
+
+    const isToken2022 = mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+    const programId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+
+    console.log(`Mint is ${isToken2022 ? 'Token-2022' : 'SPL Token'} program`);
+
+    // Get the associated token address
+    const associatedTokenAddress = await getAssociatedTokenAddress(
+        mint,
+        owner,
+        false, // allowOwnerOffCurve
+        programId
+    );
+
+    console.log(`Associated token address: ${associatedTokenAddress.toBase58()}`);
+
+    // Check if the account already exists
+    try {
+        await getAccount(connection, associatedTokenAddress, undefined, programId);
+        console.log("Associated token account already exists");
+        return associatedTokenAddress;
+    } catch (error) {
+        console.log("Associated token account doesn't exist, will be created during harvest");
+        return associatedTokenAddress;
+    }
+}
+
 export async function checkAvailableFees(mint: string) {
     try {
         const mintPubkey = new PublicKey(mint);
         
         console.log(`🔍 Checking available fees for token: ${mint}`);
         
+        // First detect which program owns this mint
+        const mintInfo = await connection.getAccountInfo(mintPubkey);
+        if (!mintInfo) {
+            throw new Error("Mint account not found");
+        }
+
+        const isToken2022 = mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+        const programId = isToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+        
+        console.log(`Token uses ${isToken2022 ? 'Token-2022' : 'SPL Token'} program`);
+
+        if (!isToken2022) {
+            console.log("⚠️  This is a regular SPL Token - no transfer fees available");
+            return {
+                totalAccounts: 0,
+                totalBalance: 0,
+                totalWithheldFees: 0,
+                harvestableAccounts: 0,
+                harvestableFees: 0,
+                threshold: threshHold,
+                accounts: []
+            };
+        }
+        
         // Get all token accounts for this specific token
-        const tokenAccounts = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
+        const tokenAccounts = await connection.getProgramAccounts(programId, {
             commitment: "confirmed",
             filters: [{
                 memcmp: {
@@ -92,7 +157,7 @@ export async function checkAvailableFees(mint: string) {
             const account = unpackAccount(
                 accountInfo.pubkey,
                 accountInfo.account,
-                TOKEN_2022_PROGRAM_ID
+                programId
             );
             
             const feeAmount = getTransferFeeAmount(account);
@@ -152,8 +217,33 @@ export async function harvestTokenFees(mint: string) {
     try {
         const mintPubkey = new PublicKey(mint);
         
+        // First detect which program owns this mint
+        const mintInfo = await connection.getAccountInfo(mintPubkey);
+        if (!mintInfo) {
+            throw new Error("Mint account not found");
+        }
+
+        const isToken2022 = mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID);
+        
+        if (!isToken2022) {
+            console.log("⚠️  This is a regular SPL Token - no transfer fees to harvest");
+            return { success: false, message: "No transfer fees available for SPL Token" };
+        }
+
+        const programId = TOKEN_2022_PROGRAM_ID;
+        
+        // Get or create the destination token account for the payer
+        const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
+            connection,
+            payer,
+            mintPubkey,
+            payer.publicKey
+        );
+
+        console.log(`Destination token account: ${destinationTokenAccount.toBase58()}`);
+        
         // Get all token accounts for this specific token
-        const tokenAccounts = await connection.getProgramAccounts(TOKEN_2022_PROGRAM_ID, {
+        const tokenAccounts = await connection.getProgramAccounts(programId, {
             commitment: "confirmed",
             filters: [{
                 memcmp: {
@@ -169,7 +259,7 @@ export async function harvestTokenFees(mint: string) {
                 const account = unpackAccount(
                     accountInfo.pubkey,
                     accountInfo.account,
-                    TOKEN_2022_PROGRAM_ID
+                    programId
                 );
                 
                 const feeAmount = getTransferFeeAmount(account);
@@ -196,8 +286,8 @@ export async function harvestTokenFees(mint: string) {
             connection,
             payer,
             mintPubkey,
-            payer.publicKey,
-            payer.publicKey,
+            destinationTokenAccount, // Use the proper token account, not wallet address
+            payer.publicKey,        // Withdraw authority
             accountsWithFees.map(acc => acc.pubkey)
         );
 
